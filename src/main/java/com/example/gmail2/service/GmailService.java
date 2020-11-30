@@ -18,13 +18,13 @@ import java.util.UUID;
 public class GmailService {
     private final RestTemplate restTemplate;
     private final ExternalMailConfiguration externalMailConfiguration;
-    List<InboxView> inboxContents = new LinkedList<>();
+
     String newString = "";
     public  GmailService(RestTemplate restTemplate, ExternalMailConfiguration externalMailConfiguration){
         this.externalMailConfiguration = externalMailConfiguration;
         this.restTemplate = restTemplate;
     }
-    public Object getPrimaryKey(UserPass userPass){//should not need loop
+    public Object getPrimaryKey(UserPass userPass){
         //UserPass userPassSivia = new UserPass("sivia", "hippo");
         //User.map.put(userPassSivia, UUID.randomUUID());
         /*if(User.map.containsKey(userPass)){
@@ -37,7 +37,7 @@ public class GmailService {
             }
         }
 
-        return new ResponseEntity<>("better luck next time  ", HttpStatus.UNAUTHORIZED);
+        return new ResponseEntity<>("nonexistent username  ", HttpStatus.UNAUTHORIZED);
         //return userPass.toString();
         //return User.map.toString();
     }
@@ -49,6 +49,7 @@ public class GmailService {
             if(toUserName.equals(User.map.get(key).getUsername())){
                 ExternalGmail externalGmail = new ExternalGmail(fromUserName, toUserName, gmailinTransit.getMessage());
                 User.EXTERNAL_GMAILS.add(externalGmail);
+                User.GMAILS.add(null);
                 return new ResponseEntity<>( "you got mail", HttpStatus.OK);
 
             }
@@ -87,7 +88,7 @@ public class GmailService {
     }
 
 
-    public Object send(GmailinTransit gmailinTransit){//avoided a loop, had to use a loop
+    public Object send(GmailinTransit gmailinTransit){
         try{
             UUID uuid = UUID.fromString(gmailinTransit.getFrom());
             String headerValue = new String(Base64.getEncoder().encode(externalMailConfiguration.getKey().getBytes()));
@@ -95,77 +96,101 @@ public class GmailService {
             headers.add("api-key", headerValue);
             HttpEntity<GmailinTransit> httpEntity = new HttpEntity<>(gmailinTransit, headers);
             if(User.map.containsKey(uuid) == false){
-                return new ResponseEntity<>("invalid UUID", HttpStatus.UNPROCESSABLE_ENTITY);
+                return new ResponseEntity<>("invalid UUID", HttpStatus.UNAUTHORIZED);
 
             }
             for(UUID key : User.map.keySet()){
                 if(gmailinTransit.getRecipientUsername().equals(User.map.get(key).getUsername())){
                     Gmail gmail = new Gmail(key, uuid, gmailinTransit.getMessage());
                     User.GMAILS.add(gmail);
+                    User.EXTERNAL_GMAILS.add(null);
+
                     return new ResponseEntity<>( "message sent", HttpStatus.OK);
                 }
-                else{
 
-                    try {
-                        restTemplate.exchange("http://" + externalMailConfiguration.getUrl() + "/api/v1/email/receiveExternalMail", HttpMethod.POST, httpEntity, Void.class);
-                    }
-                    catch (HttpStatusCodeException a) {
-                        return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
-                    }
-                    return new ResponseEntity<>(HttpStatus.OK);
-                }
 
             }
+            //if the recipient was not found in the map
+            gmailinTransit.from =  User.map.get(uuid).getUsername();
+            ExternalGmail externalGmail = new ExternalGmail( gmailinTransit.from ,gmailinTransit.recipientUsername, gmailinTransit.message);
+            User.GMAILS.add(null);
+            User.EXTERNAL_GMAILS.add(externalGmail);
+
+            try {
+                restTemplate.exchange("http://" + "localhost:8382/api/v1/email/receiveExternalMail", HttpMethod.POST, httpEntity, Void.class);
+            }
+            catch (HttpStatusCodeException a) {
+                return new ResponseEntity<>("username not found", HttpStatus.BAD_REQUEST);
+            }
+            return new ResponseEntity<>("message sent", HttpStatus.OK);
+
         }
         catch (IllegalArgumentException e){
 
+            return new ResponseEntity<>("invalid UUID", HttpStatus.UNPROCESSABLE_ENTITY);
 
         }
 
-        return new ResponseEntity<>("nonexistent username", HttpStatus.NOT_FOUND);
+
     }
-    public Object inbox(Key key){//avoided a loop
+    public Object inbox(Key key){
         UUID user = UUID.fromString(key.getKey());
         if(User.map.containsKey(user) == false){
             return new ResponseEntity<>("invalid UUID", HttpStatus.UNPROCESSABLE_ENTITY);
         }
 
 
-        for(int i = 0; i < User.GMAILS.size(); i++){
+        /*for(int i = 0; i < User.GMAILS.size(); i++){
             if(User.GMAILS.get(i).getTo().equals(user)){
                 String username = User.map.get(User.GMAILS.get(i).getFrom()).getUsername();
                 InboxView inboxView = new InboxView(username, User.GMAILS.get(i).getMessage());
                 inboxContents.add(inboxView);
+            }
+        }*/
+        List<InboxView> inboxContents = new LinkedList<>();
+        for (int i = 0; i < User.GMAILS.size(); i++){
+            if(User.GMAILS.get(i) == null){
+                    InboxView inboxView = new InboxView(User.EXTERNAL_GMAILS.get(i).getFromUserName(), User.EXTERNAL_GMAILS.get(i).getMessage());
+                    inboxContents.add(inboxView);
 
             }
+            else{
+                if(User.GMAILS.get(i).getTo().equals(user)){
+                    String username = User.map.get(User.GMAILS.get(i).getFrom()).getUsername();
+                    InboxView inboxView = new InboxView(username, User.GMAILS.get(i).getMessage());
+                    inboxContents.add(inboxView);
+                }
+            }
+
         }
-        for(int i = 0; i < User.EXTERNAL_GMAILS.size(); i++){
-
-                String username = User.EXTERNAL_GMAILS.get(i).getFromUserName();
-                InboxView inboxView = new InboxView(username, User.EXTERNAL_GMAILS.get(i).getMessage());
-                inboxContents.add(inboxView);
-
-        }
-
 
 
 
         return new ResponseEntity<>(inboxContents, HttpStatus.OK);
     }
 
-    public Object outbox(Key key){//avoided a loop
+    public Object outbox(Key key){
         UUID user = UUID.fromString(key.getKey());
         if(User.map.containsKey(user) == false){
             return new ResponseEntity<>("invalid UUID", HttpStatus.UNPROCESSABLE_ENTITY);
         }
         List<OutboxView> outboxContents = new LinkedList<>();
 
-        for(int i = 0; i < User.GMAILS.size(); i++){
-            if(User.GMAILS.get(i).getFrom().equals(user)){
-                String username = User.map.get(User.GMAILS.get(i).getTo()).getUsername();
-                OutboxView outboxView = new OutboxView(username, User.GMAILS.get(i).getMessage());
-                outboxContents.add(outboxView);
+
+        for (int i = 0; i < User.GMAILS.size(); i++){
+            if(User.GMAILS.get(i) == null){
+                    OutboxView outboxView = new OutboxView(User.EXTERNAL_GMAILS.get(i).getToUserName(), User.EXTERNAL_GMAILS.get(i).getMessage());
+                    outboxContents.add(outboxView);
+
             }
+            else{
+                if(User.GMAILS.get(i).getFrom().equals(user)){
+                    String username = User.map.get(User.GMAILS.get(i).getTo()).getUsername();
+                    OutboxView outboxView = new OutboxView(username, User.GMAILS.get(i).getMessage());
+                    outboxContents.add(outboxView);
+                }
+            }
+
         }
         return new ResponseEntity<>(outboxContents, HttpStatus.OK);
     }
