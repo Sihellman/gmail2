@@ -1,0 +1,11 @@
+server:
+  port: 8080
+
+mail:
+  external:
+    url: ti-timeserver.herokuapp.com
+    key: letMeIn
+
+featureswitch:
+  printIp: true
+  emailUp: true
